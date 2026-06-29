@@ -4,19 +4,12 @@ import path from 'path'
 
 const router = express.Router()
 
-// POST /api/reports/generate - Generate all reports from docx files
+// POST /api/reports/generate - Generate all reports
 router.post('/generate', async (req, res) => {
   try {
-    const { docxDir } = req.body
+    const { docxDir = '' } = req.body
 
-    if (!docxDir) {
-      return res.status(400).json({
-        error: 'docxDir is required',
-        message: 'Provide the path to the directory containing _EI_Report.docx files',
-      })
-    }
-
-    console.log(`Starting report generation from: ${docxDir}`)
+    console.log(`Starting report generation${docxDir ? ` from: ${docxDir}` : ' (using template narratives)'}`)
     const results = await generateAllReports(docxDir)
 
     const successCount = results.filter((r) => r.success).length
@@ -34,6 +27,7 @@ router.post('/generate', async (req, res) => {
   } catch (error: any) {
     console.error('Report generation error:', error)
     res.status(500).json({
+      success: false,
       error: 'Report generation failed',
       message: error.message,
     })
