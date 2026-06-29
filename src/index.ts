@@ -5,6 +5,7 @@ import express, { Request, Response } from 'express'
 import cors from 'cors'
 import multer from 'multer'
 import { parseExcelFile, computeImportDiff, executeImport } from './lib/importMembers'
+import reportsRouter from './routes/reports'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -98,6 +99,9 @@ app.post(
     }
   }
 )
+
+// Reports routes
+app.use('/api/reports', reportsRouter)
 
 app.listen(PORT, () => {
   console.log(`KnowMind backend running on http://localhost:${PORT}`)
