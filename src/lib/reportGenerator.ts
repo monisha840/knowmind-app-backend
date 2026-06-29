@@ -1,11 +1,19 @@
 import { createClient } from '@supabase/supabase-js'
 import fs from 'fs'
 import path from 'path'
+import DocxParser from 'docx-parser'
 
 interface ExtractedNarrative {
   personalNote: string
   whatYouShared: string
   actionPlan: string
+  docxMemberName: string
+}
+
+interface ParseError {
+  member: string
+  file: string
+  sections: string[]
 }
 
 interface ReportGenerationResult {
@@ -16,41 +24,83 @@ interface ReportGenerationResult {
   error?: string
 }
 
-// For Phase 8, we'll use placeholder narratives
-// In production, integrate with a docx parsing library like 'mammoth' or 'docx'
-function createPlaceholderNarrative(memberName: string): ExtractedNarrative {
-  return {
-    personalNote: `Dear ${memberName},\n\nWelcome to your Emotional Intelligence Assessment Report. This report provides you with a comprehensive understanding of your EI strengths and growth opportunities. Our assessment measures your capacity for self-awareness, self-regulation, motivation, empathy, social & leadership skills, and relationship intelligence.\n\nYour scores reflect your current state of emotional intelligence. The insights shared here are meant to guide your development journey and enhance your effectiveness in personal and professional relationships.\n\nWarm regards,\nKaleeswaran\nFounder, KnowMind Universe`,
-    whatYouShared: 'Thank you for sharing your reflections during the assessment. Your openness and willingness to explore your EI dimensions is the first step towards meaningful growth.',
-    actionPlan: '21-Day Action Plan:\n\nWeek 1: Foundation\n- Day 1-3: Reflect on your top strength. How can you leverage this more?\n- Day 4-7: Identify one growth area. What small habit can you change?\n\nWeek 2: Practice\n- Day 8-10: Practice mindfulness for self-awareness (10 mins daily)\n- Day 11-14: Journaling exercise on your emotions\n\nWeek 3: Integration\n- Day 15-17: Share one vulnerability with someone you trust\n- Day 18-21: Review progress. What shifts have you noticed?',
+// Parse docx file and extract narratives by section headings
+async function extractNarrativesFromDocx(filePath: string): Promise<ExtractedNarrative> {
+  try {
+    const data = fs.readFileSync(filePath)
+    const parser = new DocxParser()
+    const document = await parser.parse(data)
+    const fullText = document.toString()
+
+    // Extract member name from "Dear <name>," pattern
+    const nameMatch = fullText.match(/Dear\s+([A-Za-z\s]+),/)
+    if (!nameMatch) {
+      throw new Error('Could not extract member name from "Dear <name>," pattern')
+    }
+    const docxMemberName = nameMatch[1].trim()
+
+    // Extract personal note (from "Dear..." through signature, before next major section)
+    const personalNoteMatch = fullText.match(
+      /Dear\s+[A-Za-z\s]+,[\s\S]*?(?=WHAT YOU SHARED|YOUR EI|EMOTIONAL INTELLIGENCE|$)/i
+    )
+    if (!personalNoteMatch) {
+      throw new Error('Missing section: Personal note')
+    }
+    const personalNote = personalNoteMatch[0].trim()
+
+    // Extract "What You Shared" section
+    const whatYouSharedMatch = fullText.match(
+      /WHAT YOU SHARED[\s\S]*?(?=YOUR PERSONALISED ACTION PLAN|YOUR EI DIMENSION|$)/i
+    )
+    if (!whatYouSharedMatch) {
+      throw new Error('Missing section: What You Shared')
+    }
+    const whatYouShared = whatYouSharedMatch[0].trim()
+
+    // Extract action plan
+    const actionPlanMatch = fullText.match(
+      /YOUR PERSONALISED ACTION PLAN[\s\S]*?(?=YOUR NEXT STEP|CONTACT|CONFIDENTIAL|$)/i
+    )
+    if (!actionPlanMatch) {
+      throw new Error('Missing section: Your Personalised Action Plan')
+    }
+    const actionPlan = actionPlanMatch[0].trim()
+
+    return {
+      personalNote,
+      whatYouShared,
+      actionPlan,
+      docxMemberName,
+    }
+  } catch (error: any) {
+    throw new Error(`Parse error: ${error.message}`)
   }
 }
 
-// Find docx file for a member by name
-async function findReportDocx(memberName: string, docxDir: string): Promise<string | null> {
+// Find docx file for a member by name (last name match)
+function findReportDocx(memberName: string, docxDir: string): string | null {
   try {
     if (!fs.existsSync(docxDir)) {
-      console.warn(`Docx directory not found: ${docxDir}`)
       return null
     }
 
     const files = fs.readdirSync(docxDir)
-    // Look for file that contains the member name (case-insensitive)
+    // Match by last name (case-insensitive)
     const lastName = memberName.toLowerCase().split(' ').pop() || ''
 
     const matchedFile = files.find((file) => {
       const fileName = file.toLowerCase()
+      // Pattern: "42_Prabhu_EI_Report.docx"
       return fileName.includes(lastName) && fileName.endsWith('.docx')
     })
 
     return matchedFile ? path.join(docxDir, matchedFile) : null
   } catch (error: any) {
-    console.error(`Error finding docx for ${memberName}:`, error)
     return null
   }
 }
 
-// Generate reports for all 42 members
+// Generate reports for all 42 members by parsing docx files
 export async function generateAllReports(docxDir: string): Promise<ReportGenerationResult[]> {
   const supabase = createClient(
     process.env.SUPABASE_URL || '',
@@ -58,6 +108,13 @@ export async function generateAllReports(docxDir: string): Promise<ReportGenerat
   )
 
   const results: ReportGenerationResult[] = []
+  const parseErrors: ParseError[] = []
+
+  if (!docxDir || !fs.existsSync(docxDir)) {
+    throw new Error(
+      `Docx directory not found: ${docxDir || '(empty path)'}. Required for Phase 8 verbatim import.`
+    )
+  }
 
   try {
     // Get all members
@@ -68,6 +125,9 @@ export async function generateAllReports(docxDir: string): Promise<ReportGenerat
     if (membersError) {
       throw new Error(`Failed to fetch members: ${membersError.message}`)
     }
+
+    console.log(`[Phase 8] Starting report generation for ${members?.length || 0} members`)
+    console.log(`[Phase 8] Reading docx narratives from: ${docxDir}`)
 
     for (const member of members || []) {
       try {
@@ -89,18 +149,54 @@ export async function generateAllReports(docxDir: string): Promise<ReportGenerat
           continue
         }
 
-        // Check if docx file exists
-        const docxPath = await findReportDocx(member.name, docxDir)
+        // Find docx file for this member
+        const docxPath = findReportDocx(member.name, docxDir)
 
-        // Create narrative (using placeholders for Phase 8)
-        const narrative = createPlaceholderNarrative(member.name)
-
-        // Override with submission free-text if available
-        if (submission.free_text?.Q28) {
-          narrative.whatYouShared = submission.free_text.Q28
+        if (!docxPath) {
+          parseErrors.push({
+            member: member.name,
+            file: `*_${member.name.split(' ').pop()}_EI_Report.docx`,
+            sections: ['FILE_NOT_FOUND'],
+          })
+          results.push({
+            memberId: member.id,
+            memberName: member.name,
+            success: false,
+            message: `Docx file not found: No file matching name "${member.name}"`,
+          })
+          continue
         }
 
-        // Create report row
+        // Parse docx file to extract narratives verbatim
+        let narrative: ExtractedNarrative
+        try {
+          narrative = await extractNarrativesFromDocx(docxPath)
+        } catch (parseError: any) {
+          parseErrors.push({
+            member: member.name,
+            file: path.basename(docxPath),
+            sections: parseError.message.split(', '),
+          })
+          results.push({
+            memberId: member.id,
+            memberName: member.name,
+            success: false,
+            message: `Failed to parse docx: ${parseError.message}`,
+          })
+          continue
+        }
+
+        // Validate member name matches
+        if (
+          narrative.docxMemberName.toLowerCase() !==
+          member.name.toLowerCase().split(' ')[0]
+        ) {
+          console.warn(
+            `[Phase 8] Name mismatch: DB="${member.name}", Docx="Dear ${narrative.docxMemberName},"`
+          )
+        }
+
+        // Create report row with imported narratives
         const { error: createError } = await supabase
           .from('report')
           .insert({
@@ -125,9 +221,7 @@ export async function generateAllReports(docxDir: string): Promise<ReportGenerat
             memberId: member.id,
             memberName: member.name,
             success: true,
-            message: docxPath
-              ? `Report generated (docx file found for import in Phase 9)`
-              : `Report generated with template narratives`,
+            message: `Report generated with narratives imported from ${path.basename(docxPath)}`,
           })
         }
       } catch (error: any) {
@@ -139,6 +233,14 @@ export async function generateAllReports(docxDir: string): Promise<ReportGenerat
           error: error.message,
         })
       }
+    }
+
+    // Report parse errors if any
+    if (parseErrors.length > 0) {
+      console.error('[Phase 8] Parse errors found:')
+      parseErrors.forEach((pe) => {
+        console.error(`  ${pe.member}: ${pe.file} - Missing: ${pe.sections.join(', ')}`)
+      })
     }
 
     return results
