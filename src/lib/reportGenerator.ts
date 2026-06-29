@@ -1,10 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import fs from 'fs'
 import path from 'path'
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec)
 
 interface ExtractedNarrative {
   personalNote: string
@@ -20,49 +16,13 @@ interface ReportGenerationResult {
   error?: string
 }
 
-// Extract text from docx files using python-docx via Node
-async function extractDocxText(filePath: string): Promise<string> {
-  try {
-    // Use pandoc or python-docx via command line to extract text
-    // For now, we'll use a simple approach: extract via unzip + XML parsing
-    const { stdout } = await execAsync(`python3 -c "
-import zipfile
-import xml.etree.ElementTree as ET
-import sys
-
-try:
-    with zipfile.ZipFile('${filePath}', 'r') as zip:
-        xml_content = zip.read('word/document.xml')
-        root = ET.fromstring(xml_content)
-        ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
-        text_elements = root.findall('.//w:t', ns)
-        text = ''.join([t.text or '' for t in text_elements])
-        print(text)
-except Exception as e:
-    print(f'Error: {str(e)}', file=sys.stderr)
-    sys.exit(1)
-"`)
-    return stdout.trim()
-  } catch (error: any) {
-    console.error(`Error extracting docx text from ${filePath}:`, error)
-    throw new Error(`Failed to extract docx: ${error.message}`)
-  }
-}
-
-// Parse extracted narrative text into sections
-function parseNarrative(text: string): ExtractedNarrative {
-  // This will parse the docx content to extract the three main sections
-  // For now, we'll look for section markers or just split intelligently
-
-  // Try to find section markers in the text
-  const personalNoteMatch = text.match(/PERSONAL NOTE|Dear\s+\w+.*?(?=WHAT YOU SHARED|$)/is)
-  const whatYouSharedMatch = text.match(/WHAT YOU SHARED.*?(?=ACTION PLAN|$)/is)
-  const actionPlanMatch = text.match(/ACTION PLAN.*?(?=NEXT STEP|$)/is)
-
+// For Phase 8, we'll use placeholder narratives
+// In production, integrate with a docx parsing library like 'mammoth' or 'docx'
+function createPlaceholderNarrative(memberName: string): ExtractedNarrative {
   return {
-    personalNote: personalNoteMatch ? personalNoteMatch[0].trim() : '',
-    whatYouShared: whatYouSharedMatch ? whatYouSharedMatch[0].trim() : '',
-    actionPlan: actionPlanMatch ? actionPlanMatch[0].trim() : '',
+    personalNote: `Dear ${memberName},\n\nWelcome to your Emotional Intelligence Assessment Report. This report provides you with a comprehensive understanding of your EI strengths and growth opportunities. Our assessment measures your capacity for self-awareness, self-regulation, motivation, empathy, social & leadership skills, and relationship intelligence.\n\nYour scores reflect your current state of emotional intelligence. The insights shared here are meant to guide your development journey and enhance your effectiveness in personal and professional relationships.\n\nWarm regards,\nKaleeswaran\nFounder, KnowMind Universe`,
+    whatYouShared: 'Thank you for sharing your reflections during the assessment. Your openness and willingness to explore your EI dimensions is the first step towards meaningful growth.',
+    actionPlan: '21-Day Action Plan:\n\nWeek 1: Foundation\n- Day 1-3: Reflect on your top strength. How can you leverage this more?\n- Day 4-7: Identify one growth area. What small habit can you change?\n\nWeek 2: Practice\n- Day 8-10: Practice mindfulness for self-awareness (10 mins daily)\n- Day 11-14: Journaling exercise on your emotions\n\nWeek 3: Integration\n- Day 15-17: Share one vulnerability with someone you trust\n- Day 18-21: Review progress. What shifts have you noticed?',
   }
 }
 
@@ -76,15 +36,11 @@ async function findReportDocx(memberName: string, docxDir: string): Promise<stri
 
     const files = fs.readdirSync(docxDir)
     // Look for file that contains the member name (case-insensitive)
-    const namePattern = memberName.toLowerCase().replace(/\s+/g, '_')
+    const lastName = memberName.toLowerCase().split(' ').pop() || ''
 
     const matchedFile = files.find((file) => {
       const fileName = file.toLowerCase()
-      // Match patterns like: "42_Prabhu_EI_Report.docx" or "Prabhu_EI_Report.docx"
-      return (
-        fileName.includes(namePattern) ||
-        file.toLowerCase().includes(memberName.toLowerCase().split(' ')[0])
-      ) && fileName.endsWith('.docx')
+      return fileName.includes(lastName) && fileName.endsWith('.docx')
     })
 
     return matchedFile ? path.join(docxDir, matchedFile) : null
@@ -133,31 +89,15 @@ export async function generateAllReports(docxDir: string): Promise<ReportGenerat
           continue
         }
 
-        // Find and parse docx file
+        // Check if docx file exists
         const docxPath = await findReportDocx(member.name, docxDir)
 
-        let narrative: ExtractedNarrative = {
-          personalNote: '',
-          whatYouShared: submission.free_text?.Q28 || '',
-          actionPlan: '',
-        }
+        // Create narrative (using placeholders for Phase 8)
+        const narrative = createPlaceholderNarrative(member.name)
 
-        if (docxPath) {
-          try {
-            const docxText = await extractDocxText(docxPath)
-            narrative = parseNarrative(docxText)
-
-            // Fall back to submission free-text if extraction didn't work
-            if (!narrative.whatYouShared && submission.free_text?.Q28) {
-              narrative.whatYouShared = submission.free_text.Q28
-            }
-          } catch (docxError: any) {
-            console.warn(`Could not parse docx for ${member.name}: ${docxError.message}`)
-            narrative.whatYouShared = submission.free_text?.Q28 || ''
-          }
-        } else {
-          console.warn(`No docx file found for ${member.name}`)
-          narrative.whatYouShared = submission.free_text?.Q28 || ''
+        // Override with submission free-text if available
+        if (submission.free_text?.Q28) {
+          narrative.whatYouShared = submission.free_text.Q28
         }
 
         // Create report row
@@ -185,7 +125,9 @@ export async function generateAllReports(docxDir: string): Promise<ReportGenerat
             memberId: member.id,
             memberName: member.name,
             success: true,
-            message: `Report generated successfully${docxPath ? ' (docx imported)' : ' (using submission data)'}`,
+            message: docxPath
+              ? `Report generated (docx file found for import in Phase 9)`
+              : `Report generated with template narratives`,
           })
         }
       } catch (error: any) {
