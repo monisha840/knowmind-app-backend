@@ -7,6 +7,7 @@ import multer from 'multer'
 import { parseExcelFile, computeImportDiff, executeImport } from './lib/importMembers'
 import reportsRouter from './routes/reports'
 import reportsEditRouter from './routes/reportsEdit'
+import reportsBulkRouter from './routes/reportsBulk'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -104,6 +105,7 @@ app.post(
 // Reports routes
 app.use('/api/reports', reportsRouter)
 app.use('/api/reports', reportsEditRouter)
+app.use('/api/reports', reportsBulkRouter)
 
 app.listen(PORT, () => {
   console.log(`KnowMind backend running on http://localhost:${PORT}`)
